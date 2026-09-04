@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "securechannel"
+version = "0.1.0"
+description = "Secure client-server channel with offensive validation suite"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography==50.0.1",
+  "pqcrypto==1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.3",
+]
+
+[tool.setuptools]
+packages = ["secure_core", "insecure_variant", "attack_suite"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

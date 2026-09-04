@@ -1,0 +1,30 @@
+{
+  "target_variant": "insecure_variant",
+  "results": [
+    {
+      "attack": "mitm",
+      "outcome": "succeeded",
+      "details": "client accepted attacker certificate"
+    },
+    {
+      "attack": "replay",
+      "outcome": "succeeded",
+      "details": "server accepted replayed ciphertext"
+    },
+    {
+      "attack": "downgrade",
+      "outcome": "succeeded",
+      "details": "server negotiated X25519-only mode"
+    },
+    {
+      "attack": "cert_spoof",
+      "outcome": "succeeded",
+      "details": "server accepted forged client certificate"
+    },
+    {
+      "attack": "dos",
+      "outcome": "succeeded",
+      "details": "legitimate client denied: [Errno 104] Connection reset by peer"
+    }
+  ]
+}
