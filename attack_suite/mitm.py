@@ -6,11 +6,13 @@ import threading
 from secure_core.handshake import HandshakeError, HandshakePolicy, HandshakeProtocol
 from secure_core.pki import TrustStore, generate_ca, issue_certificate
 
+from . import emit_attack_result, emit_attack_start
 from .report import AttackResult, AttackTarget
 
 
 class MITMAttack:
     def run(self, target: AttackTarget) -> AttackResult:
+        emit_attack_start("mitm", target)
         rogue_ca = generate_ca("MITM-CA")
         rogue_server = issue_certificate(rogue_ca, "mitm-server")
         trust = TrustStore(ca_cert_pem=target.ca_cert_pem)
@@ -27,7 +29,13 @@ class MITMAttack:
                 hs = HandshakeProtocol(
                     HandshakePolicy(require_kyber=False, strict_cert_validation=False, enforce_transcript_hmac=False)
                 )
-                hs.server_handshake(conn, rogue_server, TrustStore(ca_cert_pem=rogue_ca.cert_pem))
+                hs.server_handshake(
+                    conn,
+                    rogue_server,
+                    TrustStore(ca_cert_pem=rogue_ca.cert_pem),
+                    connection_id=f"{target.variant}:mitm-fake-server",
+                    variant=target.variant,
+                )
                 outcome["accepted"] = True
             except Exception as exc:
                 outcome["error"] = str(exc)
@@ -46,5 +54,5 @@ class MITMAttack:
         t.join(timeout=2)
 
         if outcome["accepted"]:
-            return AttackResult("mitm", "succeeded", "client accepted attacker certificate")
-        return AttackResult("mitm", "blocked", f"client rejected MITM: {outcome['error']}")
+            return emit_attack_result("mitm", target, AttackResult("mitm", "succeeded", "client accepted attacker certificate"))
+        return emit_attack_result("mitm", target, AttackResult("mitm", "blocked", f"client rejected MITM: {outcome['error']}"))

@@ -16,3 +16,4 @@ class InsecureClient(SecureClient):
             trust,
             policy=HandshakePolicy(require_kyber=False, strict_cert_validation=False, enforce_transcript_hmac=False),
         )
+        self.variant = "insecure_variant"

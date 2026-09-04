@@ -6,6 +6,7 @@ import struct
 from dataclasses import dataclass
 
 from . import crypto
+from .events import events, key_fingerprint
 from .pki import Identity, TrustStore, validate_certificate
 
 
@@ -68,7 +69,15 @@ class HandshakeProtocol:
     def __init__(self, policy: HandshakePolicy):
         self.policy = policy
 
-    def client_handshake(self, sock: socket.socket, client_identity: Identity, trust: TrustStore) -> HandshakeResult:
+    def client_handshake(
+        self,
+        sock: socket.socket,
+        client_identity: Identity,
+        trust: TrustStore,
+        *,
+        connection_id: str = "unknown",
+        variant: str = "secure_core",
+    ) -> HandshakeResult:
         x_priv, x_pub = crypto.x25519_keypair()
         k_pub, k_sec = crypto.kyber_keypair()
 
@@ -87,8 +96,22 @@ class HandshakeProtocol:
             "client_cert": client_identity.cert_pem.decode("utf-8"),
         }
         send_frame(sock, hello)
+        events.emit(
+            "handshake.send.client_hello",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type="client_hello",
+            frame_json=json.dumps(hello, separators=(",", ":")),
+        )
 
         server_hello = recv_frame(sock)
+        events.emit(
+            "handshake.recv.server_hello",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type=server_hello.get("type", "unknown"),
+            frame_json=json.dumps(server_hello, separators=(",", ":")),
+        )
         if server_hello.get("type") != "server_hello":
             raise HandshakeError("expected server_hello")
 
@@ -108,6 +131,15 @@ class HandshakeProtocol:
         kyber_shared = b""
         if selected_cipher == crypto.CIPHER_HYBRID:
             kyber_shared = crypto.kyber_decapsulate(k_sec, crypto.b64d(server_hello["kyber_ct"]))
+        shared_secret = ecdh + kyber_shared
+        events.emit(
+            "crypto.shared_secret_derived",
+            connection_id=connection_id,
+            variant=variant,
+            selected_cipher=selected_cipher,
+            shared_secret_fingerprint=key_fingerprint(shared_secret),
+            used_kyber=selected_cipher == crypto.CIPHER_HYBRID,
+        )
 
         transcript_server = {
             "type": "server_hello",
@@ -117,7 +149,16 @@ class HandshakeProtocol:
             "server_cert": server_hello["server_cert"],
         }
         transcript = _canon(hello) + _canon(transcript_server)
-        schedule = crypto.derive_keys(ecdh + kyber_shared, transcript)
+        schedule = crypto.derive_keys(shared_secret, transcript)
+        events.emit(
+            "crypto.key_schedule_derived",
+            connection_id=connection_id,
+            variant=variant,
+            selected_cipher=selected_cipher,
+            c2s_key_fingerprint=key_fingerprint(schedule.c2s_key),
+            s2c_key_fingerprint=key_fingerprint(schedule.s2c_key),
+            transcript_key_fingerprint=key_fingerprint(schedule.transcript_key),
+        )
 
         provided_mac = crypto.b64d(server_hello.get("transcript_hmac", ""))
         expected_mac = crypto.transcript_hmac(schedule.transcript_key, transcript, b"server-hello")
@@ -129,13 +170,42 @@ class HandshakeProtocol:
             "verify": crypto.b64e(crypto.transcript_hmac(schedule.transcript_key, transcript, b"client-finished")),
         }
         send_frame(sock, finished)
+        events.emit(
+            "handshake.send.finished",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type="finished",
+            frame_json=json.dumps(finished, separators=(",", ":")),
+        )
         done = recv_frame(sock)
+        events.emit(
+            "handshake.recv.handshake_complete",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type=done.get("type", "unknown"),
+            frame_json=json.dumps(done, separators=(",", ":")),
+        )
         if done.get("type") != "handshake_complete":
             raise HandshakeError("missing completion")
         return HandshakeResult(tx_key=schedule.c2s_key, rx_key=schedule.s2c_key, selected_cipher=selected_cipher)
 
-    def server_handshake(self, sock: socket.socket, server_identity: Identity, trust: TrustStore) -> HandshakeResult:
+    def server_handshake(
+        self,
+        sock: socket.socket,
+        server_identity: Identity,
+        trust: TrustStore,
+        *,
+        connection_id: str = "unknown",
+        variant: str = "secure_core",
+    ) -> HandshakeResult:
         hello = recv_frame(sock)
+        events.emit(
+            "handshake.recv.client_hello",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type=hello.get("type", "unknown"),
+            frame_json=json.dumps(hello, separators=(",", ":")),
+        )
         if hello.get("type") != "client_hello":
             raise HandshakeError("expected client_hello")
         if hello.get("version") != crypto.PROTOCOL_VERSION:
@@ -165,6 +235,15 @@ class HandshakeProtocol:
         if selected == crypto.CIPHER_HYBRID:
             kyber_ct_b, kyber_shared = crypto.kyber_encapsulate(crypto.b64d(hello["kyber_pub"]))
             kyber_ct = crypto.b64e(kyber_ct_b)
+        shared_secret = ecdh + kyber_shared
+        events.emit(
+            "crypto.shared_secret_derived",
+            connection_id=connection_id,
+            variant=variant,
+            selected_cipher=selected,
+            shared_secret_fingerprint=key_fingerprint(shared_secret),
+            used_kyber=selected == crypto.CIPHER_HYBRID,
+        )
 
         server_hello_core = {
             "type": "server_hello",
@@ -174,18 +253,49 @@ class HandshakeProtocol:
             "server_cert": server_identity.cert_pem.decode("utf-8"),
         }
         transcript = _canon(hello) + _canon(server_hello_core)
-        schedule = crypto.derive_keys(ecdh + kyber_shared, transcript)
+        schedule = crypto.derive_keys(shared_secret, transcript)
+        events.emit(
+            "crypto.key_schedule_derived",
+            connection_id=connection_id,
+            variant=variant,
+            selected_cipher=selected,
+            c2s_key_fingerprint=key_fingerprint(schedule.c2s_key),
+            s2c_key_fingerprint=key_fingerprint(schedule.s2c_key),
+            transcript_key_fingerprint=key_fingerprint(schedule.transcript_key),
+        )
 
         server_hello = dict(server_hello_core)
         server_hello["transcript_hmac"] = crypto.b64e(
             crypto.transcript_hmac(schedule.transcript_key, transcript, b"server-hello")
         )
         send_frame(sock, server_hello)
+        events.emit(
+            "handshake.send.server_hello",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type="server_hello",
+            frame_json=json.dumps(server_hello, separators=(",", ":")),
+        )
 
         finished = recv_frame(sock)
+        events.emit(
+            "handshake.recv.finished",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type=finished.get("type", "unknown"),
+            frame_json=json.dumps(finished, separators=(",", ":")),
+        )
         expected = crypto.transcript_hmac(schedule.transcript_key, transcript, b"client-finished")
         if self.policy.enforce_transcript_hmac and crypto.b64d(finished.get("verify", "")) != expected:
             raise HandshakeError("invalid finished")
 
-        send_frame(sock, {"type": "handshake_complete"})
+        done = {"type": "handshake_complete"}
+        send_frame(sock, done)
+        events.emit(
+            "handshake.send.handshake_complete",
+            connection_id=connection_id,
+            variant=variant,
+            frame_type="handshake_complete",
+            frame_json=json.dumps(done, separators=(",", ":")),
+        )
         return HandshakeResult(tx_key=schedule.s2c_key, rx_key=schedule.c2s_key, selected_cipher=selected)
