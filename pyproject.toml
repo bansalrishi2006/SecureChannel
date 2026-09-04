@@ -11,6 +11,8 @@ requires-python = ">=3.11"
 dependencies = [
   "cryptography==50.0.1",
   "pqcrypto==1.0.0",
+  "fastapi==0.115.0",
+  "uvicorn==0.30.6",
 ]
 
 [project.optional-dependencies]
@@ -19,7 +21,13 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["secure_core", "insecure_variant", "attack_suite"]
+packages = ["secure_core", "insecure_variant", "attack_suite", "gui"]
+
+[tool.setuptools.package-data]
+gui = ["static/*"]
+
+[project.scripts]
+securechannel-gui = "gui.server:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

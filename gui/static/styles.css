@@ -1,0 +1,130 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f6f7fb;
+  color: #1a1a1a;
+}
+
+header {
+  padding: 1rem;
+  background: #ffffff;
+  border-bottom: 1px solid #d8d8e3;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #d8d8e3;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.status {
+  margin: 0.4rem 0 0;
+  font-weight: 600;
+}
+
+.connected {
+  color: #0a6a29;
+}
+
+.disconnected {
+  color: #9b1c1c;
+}
+
+.controls {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.attack-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 0.4rem;
+}
+
+button, select {
+  padding: 0.45rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+th, td {
+  border: 1px solid #d8d8e3;
+  padding: 0.35rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.event-log {
+  max-height: 260px;
+  overflow: auto;
+  background: #0f1720;
+  color: #d8e4f8;
+  border-radius: 6px;
+  padding: 0.6rem;
+  font-family: Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.log-entry {
+  margin: 0.15rem 0;
+}
+
+.log-handshake {
+  color: #9fd3ff;
+}
+
+.log-crypto {
+  color: #b7ffb7;
+}
+
+.log-session {
+  color: #ffe29f;
+}
+
+.log-attack {
+  color: #ffb6b6;
+}
+
+.result-blocked {
+  color: #0a6a29;
+  font-weight: 600;
+}
+
+.result-succeeded {
+  color: #9b1c1c;
+  font-weight: 600;
+}
+
+#sequence {
+  width: 100%;
+  height: 360px;
+  border: 1px solid #d8d8e3;
+  border-radius: 6px;
+  background: #fcfcff;
+}

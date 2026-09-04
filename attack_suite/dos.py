@@ -7,11 +7,13 @@ import time
 from secure_core.client import SecureClient
 from secure_core.pki import TrustStore
 
+from . import emit_attack_result, emit_attack_start
 from .report import AttackResult, AttackTarget
 
 
 class DoSAttack:
     def run(self, target: AttackTarget) -> AttackResult:
+        emit_attack_start("dos", target)
         sockets: list[socket.socket] = []
 
         def flood() -> None:
@@ -33,10 +35,10 @@ class DoSAttack:
             elapsed = time.time() - start
             client.close()
             if elapsed > 2.0:
-                return AttackResult("dos", "succeeded", f"legitimate client delayed to {elapsed:.2f}s")
-            return AttackResult("dos", "blocked", f"legitimate client connected in {elapsed:.2f}s")
+                return emit_attack_result("dos", target, AttackResult("dos", "succeeded", f"legitimate client delayed to {elapsed:.2f}s"))
+            return emit_attack_result("dos", target, AttackResult("dos", "blocked", f"legitimate client connected in {elapsed:.2f}s"))
         except Exception as exc:
-            return AttackResult("dos", "succeeded", f"legitimate client denied: {exc}")
+            return emit_attack_result("dos", target, AttackResult("dos", "succeeded", f"legitimate client denied: {exc}"))
         finally:
             for s in sockets:
                 try:

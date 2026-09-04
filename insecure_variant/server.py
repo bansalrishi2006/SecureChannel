@@ -20,6 +20,7 @@ class InsecureServer(SecureServer):
             identity,
             trust,
             config=ServerConfig(
+                variant="insecure_variant",
                 require_kyber=False,
                 strict_cert_validation=False,
                 enforce_transcript_hmac=False,

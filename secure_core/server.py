@@ -6,6 +6,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 
+from .events import events
 from .handshake import HandshakeError, HandshakePolicy, HandshakeProtocol, recv_frame, send_frame
 from .pki import Identity, TrustStore
 from .session import ReplayError, Session
@@ -13,6 +14,7 @@ from .session import ReplayError, Session
 
 @dataclass
 class ServerConfig:
+    variant: str = "secure_core"
     require_kyber: bool = True
     strict_cert_validation: bool = True
     enforce_transcript_hmac: bool = True
@@ -74,15 +76,34 @@ class SecureServer:
             except OSError:
                 break
             ip, _ = addr
+            connection_id = f"{ip}:{addr[1]}-{time.time_ns()}"
             if self._rate_limited(ip):
+                events.emit(
+                    "server.connection_rate_limited",
+                    connection_id=connection_id,
+                    variant=self.config.variant,
+                    client_ip=ip,
+                )
                 conn.close()
                 continue
             if not self._worker_semaphore.acquire(blocking=False):
+                events.emit(
+                    "server.connection_concurrency_rejected",
+                    connection_id=connection_id,
+                    variant=self.config.variant,
+                    client_ip=ip,
+                )
                 conn.close()
                 continue
-            threading.Thread(target=self._handle_client, args=(conn,), daemon=True).start()
+            events.emit(
+                "server.connection_accepted",
+                connection_id=connection_id,
+                variant=self.config.variant,
+                client_ip=ip,
+            )
+            threading.Thread(target=self._handle_client, args=(conn, connection_id), daemon=True).start()
 
-    def _handle_client(self, conn: socket.socket) -> None:
+    def _handle_client(self, conn: socket.socket, connection_id: str) -> None:
         conn.settimeout(self.config.handshake_timeout_seconds)
         try:
             hs = HandshakeProtocol(
@@ -92,9 +113,21 @@ class SecureServer:
                     enforce_transcript_hmac=self.config.enforce_transcript_hmac,
                 )
             )
-            result = hs.server_handshake(conn, self.identity, self.trust)
+            result = hs.server_handshake(
+                conn,
+                self.identity,
+                self.trust,
+                connection_id=connection_id,
+                variant=self.config.variant,
+            )
             conn.settimeout(10)
-            session = Session(tx_key=result.tx_key, rx_key=result.rx_key, allow_replay=self.config.allow_replay)
+            session = Session(
+                tx_key=result.tx_key,
+                rx_key=result.rx_key,
+                allow_replay=self.config.allow_replay,
+                connection_id=connection_id,
+                variant=self.config.variant,
+            )
             while True:
                 msg = recv_frame(conn)
                 if msg.get("type") != "data":
@@ -109,8 +142,18 @@ class SecureServer:
                     continue
                 response = session.encrypt_message(plaintext)
                 send_frame(conn, response)
-        except (HandshakeError, ValueError, KeyError, OSError):
-            pass
+        except (HandshakeError, ValueError, KeyError, OSError) as exc:
+            events.emit(
+                "server.handshake_failed",
+                connection_id=connection_id,
+                variant=self.config.variant,
+                error=str(exc),
+            )
         finally:
             conn.close()
             self._worker_semaphore.release()
+            events.emit(
+                "server.connection_closed",
+                connection_id=connection_id,
+                variant=self.config.variant,
+            )
