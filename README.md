@@ -1,6 +1,6 @@
 # SecureChannel
 
-SecureChannel is a Python 3.11+ secure communication framework with:
+SecureChannel is a Python secure communication framework with:
 
 - `secure_core/` hardened protocol implementation
 - `insecure_variant/` deliberately vulnerable implementation
