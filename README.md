@@ -6,7 +6,7 @@ SecureChannel is a Python secure communication framework with:
 - `insecure_variant/` deliberately vulnerable implementation
 - `attack_suite/` offensive validation modules
 
-## Quick start
+## How to run
 
 ```bash
 python -m pip install -e .[dev]
