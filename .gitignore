@@ -15,3 +15,5 @@ dist/
 *.csr
 *.der
 /tmp/
+.idea/
+*.egg-info/

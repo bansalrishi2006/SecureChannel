@@ -3,16 +3,20 @@ from __future__ import annotations
 import socket
 import threading
 
-from secure_core.handshake import HandshakeError, HandshakePolicy, HandshakeProtocol
+from secure_core.handshake import HandshakePolicy, HandshakeProtocol, recv_frame, send_frame
 from secure_core.pki import TrustStore, generate_ca, issue_certificate
+from secure_core.session import Session
 
-from . import emit_attack_result, emit_attack_start
 from .report import AttackResult, AttackTarget
 
 
 class MITMAttack:
-    def run(self, target: AttackTarget) -> AttackResult:
-        emit_attack_start("mitm", target)
+    def __init__(self) -> None:
+        # Populated only when run(..., capture_payload=...) is requested.
+        self.captured_payload: bytes | None = None
+
+    def run(self, target: AttackTarget, capture_payload: bytes | None = None) -> AttackResult:
+        self.captured_payload = None
         rogue_ca = generate_ca("MITM-CA")
         rogue_server = issue_certificate(rogue_ca, "mitm-server")
         trust = TrustStore(ca_cert_pem=target.ca_cert_pem)
@@ -29,14 +33,12 @@ class MITMAttack:
                 hs = HandshakeProtocol(
                     HandshakePolicy(require_kyber=False, strict_cert_validation=False, enforce_transcript_hmac=False)
                 )
-                hs.server_handshake(
-                    conn,
-                    rogue_server,
-                    TrustStore(ca_cert_pem=rogue_ca.cert_pem),
-                    connection_id=f"{target.variant}:mitm-fake-server",
-                    variant=target.variant,
-                )
+                result = hs.server_handshake(conn, rogue_server, TrustStore(ca_cert_pem=rogue_ca.cert_pem))
                 outcome["accepted"] = True
+                if capture_payload is not None:
+                    session = Session(tx_key=result.tx_key, rx_key=result.rx_key)
+                    self.captured_payload = session.decrypt_message(recv_frame(conn))
+                    send_frame(conn, session.encrypt_message(self.captured_payload))
             except Exception as exc:
                 outcome["error"] = str(exc)
             finally:
@@ -47,12 +49,17 @@ class MITMAttack:
         t.start()
         try:
             client = target.client_cls("127.0.0.1", port, target.client_identity, trust)
-            client.connect()
-            client.close()
+            if capture_payload is None:
+                client.connect()
+                client.close()
+            else:
+                client.connect()
+                client.request(capture_payload)
+                client.close()
         except Exception as exc:
             outcome["error"] = str(exc)
         t.join(timeout=2)
 
         if outcome["accepted"]:
-            return emit_attack_result("mitm", target, AttackResult("mitm", "succeeded", "client accepted attacker certificate"))
-        return emit_attack_result("mitm", target, AttackResult("mitm", "blocked", f"client rejected MITM: {outcome['error']}"))
+            return AttackResult("mitm", "succeeded", "client accepted attacker certificate")
+        return AttackResult("mitm", "blocked", f"client rejected MITM: {outcome['error']}")

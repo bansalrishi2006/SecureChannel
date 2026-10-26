@@ -1,0 +1,30 @@
+{
+  "target_variant": "secure_core",
+  "results": [
+    {
+      "attack": "mitm",
+      "outcome": "blocked",
+      "details": "client rejected MITM: untrusted issuer"
+    },
+    {
+      "attack": "replay",
+      "outcome": "blocked",
+      "details": "replay rejected: replay-detected"
+    },
+    {
+      "attack": "downgrade",
+      "outcome": "blocked",
+      "details": "downgrade rejected: connection closed"
+    },
+    {
+      "attack": "cert_spoof",
+      "outcome": "blocked",
+      "details": "certificate rejected: connection closed"
+    },
+    {
+      "attack": "dos",
+      "outcome": "blocked",
+      "details": "legitimate client connected in 0.10s"
+    }
+  ]
+}
