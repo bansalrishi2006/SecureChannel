@@ -1,1 +1,0 @@
-"""SecureChannel browser demo."""
