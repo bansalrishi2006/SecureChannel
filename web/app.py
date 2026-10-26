@@ -12,9 +12,14 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from attack_suite.mitm import MITMAttack
+from attack_suite.replay import ReplayAttack
+from attack_suite.downgrade import DowngradeAttack
+from attack_suite.cert_spoof import CertSpoofAttack
+from attack_suite.dos import DoSAttack
 from attack_suite.report import AttackTarget
 from insecure_variant.client import InsecureClient
 from insecure_variant.server import InsecureServer
+from secure_core import crypto
 from secure_core.client import SecureClient
 from secure_core.pki import Identity, TrustStore, make_test_pki
 from secure_core.server import SecureServer
@@ -82,6 +87,9 @@ def create_session():
     ca, server_identity, client_identity, trust = make_test_pki()
     secure_srv = SecureServer("127.0.0.1", 0, server_identity, trust)
     insecure_srv = InsecureServer("127.0.0.1", 0, server_identity, trust)
+    # Keep the intentionally weak demo endpoint resource constrained so the
+    # bundled connection-flood attack has a visible, repeatable effect.
+    insecure_srv._worker_semaphore = threading.BoundedSemaphore(1)
     try:
         secure_srv.start()
         insecure_srv.start()
@@ -123,6 +131,10 @@ def send_message():
     client = session.client_cls[variant](
         "127.0.0.1", session.servers[variant].port, session.client_identity, session.trust
     )
+    if variant == "insecure":
+        # Make the demo's insecure channel exercise the server's supported
+        # legacy negotiation path so the wire trace shows the downgrade.
+        client.policy.offered_ciphers = [crypto.CIPHER_X25519_ONLY]
     try:
         # send_message returns the same application frame passed to send_frame;
         # serialize it with send_frame's exact JSON separators and length prefix.
@@ -130,12 +142,18 @@ def send_message():
         wire_payload = client.send_message(plaintext)
         echoed = client.receive_message().decode("utf-8")
         session.last_messages[variant] = plaintext
+        handshake = client.handshake_result
         encoded_frame = json.dumps(wire_payload, separators=(",", ":")).encode("utf-8")
         frame = struct.pack("!I", len(encoded_frame)) + encoded_frame
         return jsonify({
             "echo": echoed,
             "frame_base64": base64.b64encode(frame).decode("ascii"),
             "frame_json": wire_payload,
+            "handshake": {
+                "selected_cipher": handshake.selected_cipher,
+                "certificate_validated": client.policy.strict_cert_validation,
+                "transcript_hmac_enforced": client.policy.enforce_transcript_hmac,
+            },
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 502
@@ -143,8 +161,7 @@ def send_message():
         client.close()
 
 
-@app.post("/api/attack/mitm")
-def attack_mitm():
+def _attack(attack_cls, name: str, capture: bool = False):
     body = request.get_json(silent=True) or {}
     session = _get_session(body.get("session_id"))
     variant = _variant(body.get("variant"))
@@ -153,8 +170,8 @@ def attack_mitm():
     if variant is None:
         return jsonify({"error": 'variant must be "secure" or "insecure"'}), 400
     if variant not in session.last_messages:
-        return jsonify({"error": "send a message on this variant before launching MITM"}), 400
-    attack = MITMAttack()
+        return jsonify({"error": f"send a message on this variant before launching {name.upper()}"}), 400
+    attack = attack_cls()
     target = AttackTarget(
         variant=variant,
         host="127.0.0.1",
@@ -163,14 +180,39 @@ def attack_mitm():
         client_identity=session.client_identity,
         client_cls=session.client_cls[variant],
     )
-    result = attack.run(target, capture_payload=session.last_messages[variant])
+    result = attack.run(target, capture_payload=session.last_messages[variant]) if capture else attack.run(target)
     payload = {
         "outcome": result.outcome,
         "details": result.details,
     }
-    if result.outcome == "succeeded" and attack.captured_payload is not None:
+    if capture and result.outcome == "succeeded" and attack.captured_payload is not None:
         payload["plaintext"] = attack.captured_payload.decode("utf-8", errors="replace")
     return jsonify(payload)
+
+
+@app.post("/api/attack/mitm")
+def attack_mitm():
+    return _attack(MITMAttack, "mitm", capture=True)
+
+
+@app.post("/api/attack/replay")
+def attack_replay():
+    return _attack(ReplayAttack, "replay")
+
+
+@app.post("/api/attack/downgrade")
+def attack_downgrade():
+    return _attack(DowngradeAttack, "downgrade")
+
+
+@app.post("/api/attack/cert-spoof")
+def attack_cert_spoof():
+    return _attack(CertSpoofAttack, "cert-spoof")
+
+
+@app.post("/api/attack/dos")
+def attack_dos():
+    return _attack(DoSAttack, "dos")
 
 
 @app.get("/api/report/<variant>")

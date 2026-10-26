@@ -16,11 +16,13 @@ class SecureClient:
         self.policy = policy or HandshakePolicy()
         self.sock: socket.socket | None = None
         self.session: Session | None = None
+        self.handshake_result = None
 
     def connect(self) -> None:
         self.sock = socket.create_connection((self.host, self.port), timeout=5)
         hs = HandshakeProtocol(self.policy)
         result = hs.client_handshake(self.sock, self.identity, self.trust)
+        self.handshake_result = result
         self.session = Session(tx_key=result.tx_key, rx_key=result.rx_key)
 
     def close(self) -> None:
